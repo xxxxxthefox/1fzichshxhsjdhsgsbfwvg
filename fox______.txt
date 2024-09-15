@@ -1,0 +1,520 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local UserInputService = game:GetService("UserInputService")
+local Teams = game:GetService("Teams")
+
+-- Local Player
+local localPlayer = Players.LocalPlayer
+local camera = Workspace.CurrentCamera
+
+-- Variables
+local aimbotEnabled = false
+local predictionFactor = 0.1
+
+-- Colors
+local enemyColor = Color3.fromRGB(255, 0, 0)
+local teamColor = Color3.fromRGB(0, 0, 255)
+local noneColor = Color3.fromRGB(0, 255, 0)
+local enemyDetectedColor = Color3.fromRGB(255, 0, 0)
+
+-- UI Elements
+local screenGui = Instance.new("ScreenGui")
+screenGui.ResetOnSpawn = false
+screenGui.Parent = localPlayer:WaitForChild("PlayerGui")
+
+local guiFrame = Instance.new("Frame")
+guiFrame.Size = UDim2.new(0, 150, 0, 90) -- Adjusted size for the GUI frame
+guiFrame.Position = UDim2.new(0.5, -75, 0.5, -50) -- Centered position
+guiFrame.BackgroundTransparency = 0.5 -- Semi-transparent black
+guiFrame.BackgroundColor3 = Color3.new(0, 0, 0) -- Black background
+guiFrame.BorderSizePixel = 0 -- No border
+guiFrame.Parent = screenGui
+
+-- Title for the GUI
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 20) -- Height adjusted
+title.Position = UDim2.new(0, 0, 0, 0)
+title.BackgroundTransparency = 1 -- Transparent background
+title.TextColor3 = Color3.new(1, 1, 1) -- White text color
+title.TextStrokeTransparency = 0 -- Visible text stroke
+title.Font = Enum.Font.SourceSansBold
+title.TextSize = 18
+title.Text = "xxxxxthefox"
+title.Parent = guiFrame
+
+-- Toggle Button for Aimbot
+local toggleButton = Instance.new("TextButton")
+toggleButton.Size = UDim2.new(0, 90, 0, 25) -- Slightly larger size
+toggleButton.Position = UDim2.new(0.5, -45, 0.5, -12.5) -- Centered position within the GUI frame
+toggleButton.AnchorPoint = Vector2.new(0.5, 0.5)
+toggleButton.BackgroundTransparency = 0.2
+toggleButton.BackgroundColor3 = Color3.fromRGB(128, 128, 128)
+toggleButton.BorderSizePixel = 2
+toggleButton.BorderColor3 = Color3.fromRGB(0, 0, 0)
+toggleButton.TextColor3 = Color3.new(0, 0, 0) -- Black text color
+toggleButton.Text = "مطافا"
+toggleButton.Parent = guiFrame
+
+-- Enemy Status Label
+local enemyStatusLabel = Instance.new("TextLabel")
+enemyStatusLabel.Size = UDim2.new(0, 220, 0, 25) -- Slightly larger size
+enemyStatusLabel.Position = UDim2.new(0.5, -110, 0.2, -10) -- Slightly more to the right
+enemyStatusLabel.AnchorPoint = Vector2.new(0.5, 0)
+enemyStatusLabel.BackgroundTransparency = 1
+enemyStatusLabel.TextColor3 = noneColor
+enemyStatusLabel.Font = Enum.Font.SourceSansBold
+enemyStatusLabel.TextSize = 18
+enemyStatusLabel.Text = "تحديث"
+enemyStatusLabel.Parent = screenGui
+
+-- Update Label for version
+local updateLabel = Instance.new("TextLabel")
+updateLabel.Size = UDim2.new(1, 0, 0, 20) -- Adjust size as necessary
+updateLabel.Position = UDim2.new(0, 0, 1, -20)
+updateLabel.BackgroundTransparency = 1
+updateLabel.TextColor3 = Color3.new(1, 1, 1)
+updateLabel.Font = Enum.Font.SourceSans
+updateLabel.TextSize = 14
+updateLabel.Text = "كيف حالك"
+updateLabel.Parent = guiFrame
+
+-- Function to check if a player is an enemy
+local function isEnemy(player)
+    if Teams and player.Team then
+        return player.Team ~= localPlayer.Team
+    else
+        return true
+    end
+end
+
+-- Function to create a highlight around a character
+local function createHighlight(character, color)
+    local highlight = Instance.new("Highlight")
+    highlight.Adornee = character
+    highlight.FillColor = color
+    highlight.FillTransparency = 0.75
+    highlight.OutlineColor = color
+    highlight.OutlineTransparency = 0
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.Parent = character
+end
+
+-- Function to create a role label above a character's head
+local function createRoleLabel(character, text, color)
+    local billboardGui = Instance.new("BillboardGui")
+    billboardGui.Adornee = character:FindFirstChild("Head")
+    billboardGui.Size = UDim2.new(0, 100, 0, 30) -- Larger size
+    billboardGui.StudsOffset = Vector3.new(0, 6, 0) -- Adjusted offset
+    billboardGui.Parent = character
+
+    local textLabel = Instance.new("TextLabel")
+    textLabel.Size = UDim2.new(1, 0, 1, 0)
+    textLabel.BackgroundTransparency = 1
+    textLabel.TextColor3 = color
+    textLabel.Font = Enum.Font.SourceSansBold
+    textLabel.TextSize = 20 -- Larger text size
+    textLabel.Text = text
+    textLabel.Parent = billboardGui
+
+    -- Distance Label
+    local distanceLabel = Instance.new("TextLabel")
+    distanceLabel.Size = UDim2.new(1, 0, 1, 0)
+    distanceLabel.Position = UDim2.new(0, 0, 1, 0) -- Positioned below the role label
+    distanceLabel.BackgroundTransparency = 1
+    distanceLabel.TextColor3 = enemyColor
+    distanceLabel.Font = Enum.Font.SourceSansBold
+    distanceLabel.TextSize = 20 -- Same size as role label
+    distanceLabel.Parent = billboardGui
+
+    RunService.RenderStepped:Connect(function()
+        if character and character:FindFirstChild("HumanoidRootPart") then
+            local distance = (character.HumanoidRootPart.Position - localPlayer.Character.HumanoidRootPart.Position).Magnitude
+            distanceLabel.Text = string.format("Distance: %d", math.floor(distance))
+        end
+    end)
+end
+
+-- Function to check if a part is visible
+local function isPartVisible(part)
+    local origin = camera.CFrame.Position
+    local direction = (part.Position - origin).Unit * (part.Position - origin).Magnitude
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterDescendantsInstances = {localPlayer.Character, part.Parent}
+    raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+
+    local raycastResult = Workspace:Raycast(origin, direction, raycastParams)
+    return raycastResult == nil
+end
+
+-- Function to find the most visible and closest player's head hitbox
+local function getTargetPlayerHitbox()
+    local bestHitbox = nil
+    local highestPriority = 0
+
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= localPlayer and player.Character then
+            if isEnemy(player) and player.Character:FindFirstChild("Humanoid") and player.Character.Humanoid.Health > 0 then
+                local head = player.Character:FindFirstChild("Head")
+                if head and isPartVisible(head) then
+                    local distance = (head.Position - localPlayer.Character.HumanoidRootPart.Position).Magnitude
+                    local visibility = 1 / distance
+                    local priority = visibility
+
+                    if priority > highestPriority then
+                        highestPriority = priority
+                        bestHitbox = head
+                    end
+                end
+            end
+        end
+    end
+
+    return bestHitbox
+end
+
+-- Initial creation of highlights and labels
+local function updateHighlightsAndLabels()
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= localPlayer and player.Character then
+            local color = isEnemy(player) and enemyColor or teamColor
+            createHighlight(player.Character, color)
+            createRoleLabel(player.Character, isEnemy(player) and "عدو" or "صديق👍", color)
+        end
+    end
+end
+
+updateHighlightsAndLabels()
+
+-- Update highlights and labels if new players join
+Players.PlayerAdded:Connect(function(player)
+    player.CharacterAdded:Connect(function(character)
+        wait(1)
+        if player ~= localPlayer then
+            local color = isEnemy(player) and enemyColor or teamColor
+            createHighlight(character, color)
+            createRoleLabel(character, isEnemy(player) and "عدو" or "صديق👍", color)
+        end
+    end)
+end)
+
+toggleButton.MouseButton1Click:Connect(function()
+    aimbotEnabled = not aimbotEnabled
+    toggleButton.Text = aimbotEnabled and "مشغل" or "مطافا"
+    if not aimbotEnabled then
+        enemyStatusLabel.Text = "xxxxxthefox"
+        enemyStatusLabel.TextColor3 = noneColor
+    end
+end)
+
+-- Function to predict enemy movement
+local function predictMovement(hitbox, deltaTime)
+    local velocity = hitbox.Velocity
+    local acceleration = Vector3.new(0, -Workspace.Gravity, 0)
+    local predictedPosition = hitbox.Position + (velocity * predictionFactor) + (0.5 * acceleration * predictionFactor^2)
+    return predictedPosition
+end
+
+-- Main loop to update the camera focus and character's look direction
+RunService.RenderStepped:Connect(function(deltaTime)
+    if aimbotEnabled then
+        local targetHitbox = getTargetPlayerHitbox()
+
+        if targetHitbox then
+            local targetPosition = targetHitbox.Position
+            enemyStatusLabel.Text = "عدو: " .. targetHitbox.Parent.Name
+            enemyStatusLabel.TextColor3 = enemyDetectedColor
+
+            -- Smooth camera transition
+            local currentPosition = camera.CFrame.Position
+            local lookAt = CFrame.new(currentPosition, targetPosition)
+            camera.CFrame = lookAt:Lerp(CFrame.new(currentPosition, targetPosition), 0.1)
+
+            -- Smooth character transition
+            local character = localPlayer.Character
+            if character and character:FindFirstChild("HumanoidRootPart") then
+                character.HumanoidRootPart.CFrame = CFrame.new(character.HumanoidRootPart.Position, targetPosition)
+            end
+        else
+            enemyStatusLabel.Text = "التفعيلت الايم بوت..سرعه..hitbox..كشف"
+            enemyStatusLabel.TextColor3 = noneColor
+        end
+    end
+end)
+
+-- Ensure highlights, labels, and UI are re-applied after respawn
+localPlayer.CharacterAdded:Connect(function()
+    wait(1)
+    updateHighlightsAndLabels()
+    guiFrame.Parent = screenGui
+end)
+
+-- Dragging functionality for the GUI
+local dragging
+local dragInput
+local dragStart
+local startPos
+
+local function update(input)
+    local delta = input.Position - dragStart
+    guiFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+end
+
+local function onInputBegan(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = guiFrame.Position
+
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end
+
+local function onInputChanged(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end
+
+guiFrame.InputBegan:Connect(onInputBegan)
+guiFrame.InputChanged:Connect(onInputChanged)
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        update(input)
+    end
+end)
+
+-- Function to destroy the toggle button and recreate it with functionality
+local function recreateToggleButton()
+    toggleButton:Destroy()
+
+    toggleButton = Instance.new("TextButton")
+    toggleButton.Size = UDim2.new(0, 100, 0, 25) -- Slightly larger size
+    toggleButton.Position = UDim2.new(0.8, -50, 0.6, -15) -- Centered position within the GUI frame
+    toggleButton.AnchorPoint = Vector2.new(0.5, 0.5)
+    toggleButton.BackgroundTransparency = 0.2
+    toggleButton.BackgroundColor3 = Color3.fromRGB(128, 128, 128)
+    toggleButton.BorderSizePixel = 2
+    toggleButton.BorderColor3 = Color3.fromRGB(0, 0, 0)
+    toggleButton.TextColor3 = Color3.new(0, 0, 0) -- Black text color
+    toggleButton.Text = "مطافا"
+    toggleButton.Parent = guiFrame
+
+    toggleButton.MouseButton1Click:Connect(function()
+        aimbotEnabled = not aimbotEnabled
+        toggleButton.Text = aimbotEnabled and "مشغل" or "مطفا"
+        if not aimbotEnabled then
+            enemyStatusLabel.Text = "مطور السكربت xxxxxthefox"
+            enemyStatusLabel.TextColor3 = noneColor
+        end
+    end)
+end
+
+recreateToggleButton()
+local lplr = game.Players.LocalPlayer
+local camera = game:GetService("Workspace").CurrentCamera
+local CurrentCamera = workspace.CurrentCamera
+local worldToViewportPoint = CurrentCamera.worldToViewportPoint
+
+local HeadOff = Vector3.new(0, 0.5, 0)
+local LegOff = Vector3.new(0, 3, 0)
+
+local function createBoxEsp(v)
+    local Box = Drawing.new("Square")
+    Box.Visible = false
+    Box.Color = v.TeamColor.Color
+    Box.Thickness = 3
+    Box.Transparency = 1
+    Box.Filled = false
+
+    local HealthBar = Drawing.new("Line")
+    HealthBar.Visible = false
+    HealthBar.Color = Color3.new(0, 1, 0)
+    HealthBar.Thickness = 2
+
+    local NameTag = Drawing.new("Text")
+    NameTag.Visible = false
+    NameTag.Color = Color3.new(1, 1, 1)
+    NameTag.Size = 9
+    NameTag.Center = true
+    NameTag.Outline = true
+    NameTag.OutlineColor = Color3.new(0, 0, 0)
+
+    local DistanceTag = Drawing.new("Text")
+    DistanceTag.Visible = false
+    DistanceTag.Color = Color3.new(1, 1, 1)
+    DistanceTag.Size = 9
+    DistanceTag.Center = true
+    DistanceTag.Outline = true
+    DistanceTag.OutlineColor = Color3.new(0, 0, 0)
+
+    local Tracer = Drawing.new("Line")
+    Tracer.Visible = false
+    Tracer.Color = v.TeamColor.Color
+    Tracer.Thickness = 2
+
+    game:GetService("RunService").RenderStepped:Connect(function()
+        if v.Character and v.Character:FindFirstChild("Humanoid") and v.Character:FindFirstChild("HumanoidRootPart") and v ~= lplr and v.Character.Humanoid.Health > 0 then
+            local Vector, onScreen = camera:worldToViewportPoint(v.Character.HumanoidRootPart.Position)
+
+            local RootPart = v.Character.HumanoidRootPart
+            local Head = v.Character.Head
+            local RootPosition, RootVisibility = worldToViewportPoint(CurrentCamera, RootPart.Position)
+            local HeadPosition = worldToViewportPoint(CurrentCamera, Head.Position + HeadOff)
+            local LegPosition = worldToViewportPoint(CurrentCamera, RootPart.Position - LegOff)
+
+            Box.Size = Vector2.new(1000 / RootPosition.Z, HeadPosition.Y - LegPosition.Y)
+            Box.Position = Vector2.new(RootPosition.X - Box.Size.X / 2, RootPosition.Y - Box.Size.Y / 2)
+
+            local health = v.Character.Humanoid.Health / v.Character.Humanoid.MaxHealth
+            HealthBar.From = Vector2.new(Box.Position.X + Box.Size.X + 5, Box.Position.Y + Box.Size.Y * (1 - health))
+            HealthBar.To = Vector2.new(Box.Position.X + Box.Size.X + 5, Box.Position.Y + Box.Size.Y)
+            HealthBar.Color = Color3.new(1 - health, health, 0)
+
+            NameTag.Position = Vector2.new(Box.Position.X + Box.Size.X / 2, Box.Position.Y - 20)
+            NameTag.Text = v.Name
+            NameTag.Visible = true
+
+            DistanceTag.Position = Vector2.new(Box.Position.X + Box.Size.X / 2, Box.Position.Y + Box.Size.Y)
+            DistanceTag.Text = tostring(math.floor((lplr.Character.HumanoidRootPart.Position - RootPart.Position).Magnitude)) .. "m"
+            DistanceTag.Visible = true
+
+            local lplrHead = lplr.Character:FindFirstChild("Head")
+            if lplrHead then
+                local lplrHeadViewport = camera:worldToViewportPoint(lplrHead.Position)
+
+                Tracer.From = Vector2.new(lplrHeadViewport.X, lplrHeadViewport.Y)
+                Tracer.To = Vector2.new(RootPosition.X, RootPosition.Y)
+            end
+
+            if onScreen then
+                Box.Visible = true
+                HealthBar.Visible = true
+                NameTag.Visible = true
+                DistanceTag.Visible = true
+                Tracer.Visible = true
+            else
+                Box.Visible = false
+                HealthBar.Visible = false
+                NameTag.Visible = false
+                DistanceTag.Visible = false
+                Tracer.Visible = false
+            end
+        else
+            Box.Visible = false
+            HealthBar.Visible = false
+            NameTag.Visible = false
+            DistanceTag.Visible = false
+            Tracer.Visible = false
+        end
+    end)
+end
+
+for i, v in pairs(game.Players:GetChildren()) do
+    createBoxEsp(v)
+end
+
+game.Players.PlayerAdded:Connect(function(v)
+    createBoxEsp(v)
+end)
+
+
+local ScreenGui = Instance.new("ScreenGui")
+local main = Instance.new("Frame")
+local label = Instance.new("TextLabel")
+local Hitbox = 
+Instance.new("TextButton")
+
+ScreenGui.Parent = game.CoreGui
+
+main.Name = "main"
+main.Parent = ScreenGui
+main.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
+main.Position = UDim2.new(0.40427351, 0, 0.34591195, 0)
+main.Size = UDim2.new(0, 100, 0, 100)
+main.Active = true
+main.Draggable = true
+
+label.Name = "label"
+label.Parent = main
+label.BackgroundColor3 = Color3.fromRGB(139,0,0)
+label.Size = UDim2.new(0, 100, 0, 20)
+label.Font = Enum.Font.SourceSans
+label.Text = "fox"
+label.TextColor3 = Color3.fromRGB(0, 0, 0)
+label.TextScaled = true
+label.TextSize = 5.000
+label.TextWrapped = true
+
+Hitbox.Name = "سرعه"
+Hitbox.Parent = main
+Hitbox.BackgroundColor3 = Color3.fromRGB(0, 0, 255)
+Hitbox.Position = UDim2.new(0.114285722, 0, 0.372448981, 0)
+Hitbox.Size = UDim2.new(0, 90, 0, 40)
+Hitbox.Font = Enum.Font.SourceSans
+Hitbox.Text = "سرعه"
+Hitbox.TextColor3 = Color3.fromRGB(0, 0, 0)
+Hitbox.TextSize = 40.000
+Hitbox.MouseButton1Down:connect(function()
+	game.StarterGui:SetCore("SendNotification",  {
+ Title = "تم التشغيل";
+ Text = "<3";
+ Icon = "rbxassetid://115469660765124";
+ Duration = 20;
+})
+
+function isNumber(str)
+  if tonumber(str) ~= nil or str == 'inf' then
+    return true
+  end
+end
+local tspeed = 1
+local hb = game:GetService("RunService").Heartbeat
+local tpwalking = true
+local player = game:GetService("Players")
+local lplr = player.LocalPlayer
+local chr = lplr.Character
+local hum = chr and chr:FindFirstChildWhichIsA("Humanoid")
+while tpwalking and hb:Wait() and chr and hum and hum.Parent do
+  if hum.MoveDirection.Magnitude > 0 then
+    if tspeed and isNumber(tspeed) then
+      chr:TranslateBy(hum.MoveDirection * tonumber(tspeed))
+    else
+      chr:TranslateBy(hum.MoveDirection)
+    end
+  end
+end
+
+
+game:GetService('RunService').RenderStepped:connect(function()
+		if _G.Disabled then
+			for i,v in next, game:GetService('Players'):GetPlayers() do
+				if v.Name ~= game:GetService('Players').LocalPlayer.Name then
+					pcall(function()
+						v.Character.HumanoidRootPart.Size = Vector3.new(_G.HeadSize,_G.HeadSize,_G.HeadSize)
+						v.Character.HumanoidRootPart.Transparency = 0.7
+						v.Character.HumanoidRootPart.BrickColor = BrickColor.new("Really black")
+						v.Character.HumanoidRootPart.Material = "Neon"
+						v.Character.HumanoidRootPart.CanCollide = false
+					end)
+				end
+			end
+		end
+	end)
+end)
+
+
+
+_G.HeadSize = 15 _G.Disabled = true game:GetService('RunService').RenderStepped:connect(function() if _G.Disabled then for i,v in next, game:GetService('Players'):GetPlayers() do if v.Name ~= game:GetService('Players').LocalPlayer.Name then pcall(function() v.Character.HumanoidRootPart.Size = Vector3.new(_G.HeadSize,_G.HeadSize,_G.HeadSize) v.Character.HumanoidRootPart.Transparency = 1.0 v.Character.HumanoidRootPart.BrickColor = BrickColor.new("Really blue") v.Character.HumanoidRootPart.Material = "Neon" v.Character.HumanoidRootPart.CanCollide = false end) end end end end)
+
+
+game.StarterGui:SetCore("SendNotification",  {
+ Title = "تم التشغيل السكربت";
+ Text = "xxxxxthefox";
+ Icon = "rbxassetid://115469660765124";
+ Duration = 20;
+})
